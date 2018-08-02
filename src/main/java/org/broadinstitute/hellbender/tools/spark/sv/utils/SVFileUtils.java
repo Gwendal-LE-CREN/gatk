@@ -1,11 +1,13 @@
 package org.broadinstitute.hellbender.tools.spark.sv.utils;
 
 import htsjdk.samtools.*;
+import org.apache.spark.api.java.JavaRDD;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.tools.spark.utils.HopscotchSet;
 import org.broadinstitute.hellbender.utils.Utils;
 import org.broadinstitute.hellbender.utils.gcs.BucketUtils;
 import org.broadinstitute.hellbender.utils.io.IOUtils;
+import org.broadinstitute.hellbender.utils.read.GATKRead;
 
 import java.io.*;
 import java.util.*;
@@ -13,6 +15,41 @@ import java.util.*;
 public final class SVFileUtils {
 
     private static final String REFERENCE_GAP_INTERVAL_FILE_COMMENT_LINE_PROMPT = "#";
+
+    /**
+     * write SAM file for provided {@code filteredContigs}
+     * by extracting original alignments from {@code originalAlignments},
+     * to directory specified by {@code outputDir}.
+     */
+    public static void writeSAMRecords(final JavaRDD<GATKRead> reads, final Set<String> readNameToInclude,
+                                       final String outputPath, final SAMFileHeader header) {
+        writeSAMRecords(reads.collect(), readNameToInclude, outputPath, header);
+    }
+
+    public static void writeSAMRecords(final List<GATKRead> reads, final Set<String> readNameToInclude,
+                                       final String outputPath, final SAMFileHeader header) {
+        final SAMFileHeader cloneHeader = header.clone();
+        final SAMRecordComparator localComparator;
+        if (outputPath.toLowerCase().endsWith("bam")) {
+            cloneHeader.setSortOrder(SAMFileHeader.SortOrder.coordinate);
+            localComparator = new SAMRecordCoordinateComparator();
+        } else if (outputPath.toLowerCase().endsWith("sam")) {
+            cloneHeader.setSortOrder(SAMFileHeader.SortOrder.queryname);
+            localComparator = new SAMRecordQueryNameComparator();
+        } else {
+            throw new IllegalArgumentException("Unsupported output format " + outputPath);
+        }
+
+        final List<SAMRecord> samRecords = new ArrayList<>();
+        reads.forEach(gatkRead -> {
+            if ( readNameToInclude.contains(gatkRead.getName()) ) {
+                samRecords.add(gatkRead.convertToSAMRecord(cloneHeader));
+            }
+        });
+
+        samRecords.sort(localComparator);
+        writeSAMFile( outputPath, samRecords.iterator(), cloneHeader, true);
+    }
 
     public static void writeSAMFile(final String outputName, final Iterator<SAMRecord> alignments, final SAMFileHeader header,
                                     final boolean preOrdered) {

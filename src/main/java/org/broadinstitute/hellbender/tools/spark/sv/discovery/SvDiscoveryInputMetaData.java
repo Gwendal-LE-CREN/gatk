@@ -139,7 +139,7 @@ public final class SvDiscoveryInputMetaData {
 
         final SAMSequenceDictionary sequenceDictionary = headerForReads.getSequenceDictionary();
         final Broadcast<Set<String>> canonicalChromosomesBroadcast =
-                ctx.broadcast(SvDiscoveryUtils.getCanonicalChromosomes(nonCanonicalChromosomeNamesFile, sequenceDictionary));
+                ctx.broadcast(SVUtils.getCanonicalChromosomes(nonCanonicalChromosomeNamesFile, sequenceDictionary));
         final String sampleId = SVUtils.getSampleId(headerForReads);
 
         this.referenceData = new ReferenceData(canonicalChromosomesBroadcast, ctx.broadcast(reference), ctx.broadcast(sequenceDictionary));
