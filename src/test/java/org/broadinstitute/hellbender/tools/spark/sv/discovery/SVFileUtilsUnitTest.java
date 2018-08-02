@@ -6,6 +6,7 @@ import org.apache.spark.api.java.JavaRDD;
 import org.broadinstitute.hellbender.GATKBaseTest;
 import org.broadinstitute.hellbender.engine.spark.SparkContextFactory;
 import org.broadinstitute.hellbender.engine.spark.datasources.ReadsSparkSource;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.SVFileUtils;
 import org.broadinstitute.hellbender.utils.read.GATKRead;
 import org.broadinstitute.hellbender.utils.test.BaseTest;
 import org.testng.Assert;
@@ -17,10 +18,10 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 
-public class SvDiscoveryUtilsUnitTest extends GATKBaseTest {
+public class SVFileUtilsUnitTest extends GATKBaseTest {
 
     @Test(groups = "sv")
-    public void test() {
+    public void testWriteSAMRecords() {
 
         ReadsSparkSource readSource = new ReadsSparkSource(SparkContextFactory.getTestSparkContext(), ValidationStringency.LENIENT);
         final String referenceFile = b38_reference_20_21;
@@ -39,7 +40,7 @@ public class SvDiscoveryUtilsUnitTest extends GATKBaseTest {
 
         // test output empty set
         String outputPath = tempDirNew.getAbsolutePath() + "/out.bam";
-        SvDiscoveryUtils.writeSAMRecords(rddParallelReads, Collections.emptySet(), outputPath, header);
+        SVFileUtils.writeSAMRecords(rddParallelReads, Collections.emptySet(), outputPath, header);
         Assert.assertTrue(readSource.getParallelReads(outputPath, referenceFile).collect().isEmpty());
 
         // test output BAM
@@ -53,12 +54,12 @@ public class SvDiscoveryUtilsUnitTest extends GATKBaseTest {
                 "asm016781:tig00011",
                 "asm028317:tig00003",
                 "asm000004:tig00022"));
-        SvDiscoveryUtils.writeSAMRecords(rddParallelReads, names, outputPath, header);
+        SVFileUtils.writeSAMRecords(rddParallelReads, names, outputPath, header);
         Assert.assertEquals(readSource.getParallelReads(outputPath, referenceFile).collect().size(), 16);
 
         // test output SAM
         outputPath = tempDirNew.getAbsolutePath() + "/out.sam";
-        SvDiscoveryUtils.writeSAMRecords(rddParallelReads, names, outputPath, header);
+        SVFileUtils.writeSAMRecords(rddParallelReads, names, outputPath, header);
         Assert.assertEquals(readSource.getParallelReads(outputPath, referenceFile).collect().size(), 16);
     }
 }

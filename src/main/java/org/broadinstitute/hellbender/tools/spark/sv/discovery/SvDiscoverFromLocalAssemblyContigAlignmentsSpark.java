@@ -454,7 +454,7 @@ public final class SvDiscoverFromLocalAssemblyContigAlignmentsSpark extends GATK
             if ( !variantContext.hasAttribute(GATKSVVCFConstants.CONTIG_NAMES) )
                 return true;
 
-            final List<String> mapQuals = SvDiscoveryUtils.getAttributeAsStringList(variantContext, attributeKey);
+            final List<String> mapQuals = SVUtils.getAttributeAsStringList(variantContext, attributeKey);
             int maxMQ = 0;
             for (final String mapQual : mapQuals) {
                 Integer integer = Integer.valueOf(mapQual);
