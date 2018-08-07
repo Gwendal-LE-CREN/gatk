@@ -1,11 +1,13 @@
 package org.broadinstitute.hellbender.tools.walkers.variantutils;
 
 import htsjdk.samtools.SAMSequenceDictionary;
+import htsjdk.samtools.reference.ReferenceSequenceFileFactory;
 import htsjdk.variant.utils.SAMSequenceDictionaryExtractor;
 import htsjdk.variant.vcf.VCFFileReader;
 import htsjdk.variant.vcf.VCFHeader;
 import org.broadinstitute.barclay.argparser.CommandLineException;
 import org.broadinstitute.hellbender.CommandLineProgramTest;
+import org.broadinstitute.hellbender.cmdline.StandardArgumentDefinitions;
 import org.broadinstitute.hellbender.utils.test.ArgumentsBuilder;
 
 import org.testng.Assert;
@@ -14,6 +16,11 @@ import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.stream.Collectors;
 
 public class UpdateVCFSequenceDictionaryIntegrationTest extends CommandLineProgramTest {
     private File testDir = new File(getTestDataDir(), "walkers/variantutils/UpdateVCFSequenceDictionary");
@@ -21,19 +28,19 @@ public class UpdateVCFSequenceDictionaryIntegrationTest extends CommandLineProgr
     @DataProvider(name="UpdateGoodSequenceDictionaryData")
     public Object[][] updateGoodSequenceDictionaryData() {
         return new Object[][]{
-                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "variantsWithDict.vcf"), null, false},
+                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "variantsWithDict.vcf"), null, null, false},
                 // pass a reference as a reference
-                new Object[]{ new File(testDir, "variantsNoDict.vcf"), null, new File(testDir, "exampleFASTA.fasta"), false},
+                new Object[]{ new File(testDir, "variantsNoDict.vcf"), null, new File(testDir, "exampleFASTA.fasta"), null, false},
                 // pass a reference as a source; we need to test both to ensure the user can bypass the framework sequence
                 // dictionary validation that will occur if you use -R
-                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "exampleFASTA.fasta"), null, false},
-                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "exampleFASTA.dict"), null, false},
+                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "exampleFASTA.fasta"), null, null, false},
+                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "exampleFASTA.dict"), null, null, false},
                 // can't handle CRAM - see https://github.com/samtools/htsjdk/issues/731
-                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "exampleBAM.bam"), null, false},
+                new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "exampleBAM.bam"), null, null, false},
                 // already has a dictionary - but force a replace
-                new Object[]{ new File(testDir, "variantsWithDict.vcf"), new File(testDir, "exampleFASTA.dict"), null, true},
+                new Object[]{ new File(testDir, "variantsWithDict.vcf"), new File(testDir, "exampleFASTA.dict"), null, null, true},
                 // already has a dictionary - but force a replace
-                new Object[]{ new File(testDir, "variantsWithDict.vcf"), new File(testDir, "exampleFASTA.dict"), null, true},
+                new Object[]{ new File(testDir, "variantsWithDict.vcf"), new File(testDir, "exampleFASTA.dict"), null, null, true},
         };
     }
 
@@ -42,9 +49,10 @@ public class UpdateVCFSequenceDictionaryIntegrationTest extends CommandLineProgr
             final File inputVariantsFile,
             final File inputSourceFile,
             final File inputReferenceFile,
-            final boolean replace) throws FileNotFoundException {
+            final String masterSequenceDictionary,
+            final boolean replace) throws FileNotFoundException, URISyntaxException {
         final SAMSequenceDictionary resultingDictionary =
-                updateSequenceDictionary(inputVariantsFile, inputSourceFile, inputReferenceFile, replace);
+                updateSequenceDictionary(inputVariantsFile, inputSourceFile, inputReferenceFile, masterSequenceDictionary, replace);
 
         // get the original sequence dictionary from the source for comparison
         SAMSequenceDictionary sourceDictionary =
@@ -69,12 +77,12 @@ public class UpdateVCFSequenceDictionaryIntegrationTest extends CommandLineProgr
     public Object[][] updateBadSequenceDictionaryData() {
         return new Object[][]{
             // already has a dictionary
-            new Object[]{ new File(testDir, "variantsWithDict.vcf"), new File(testDir, "variantsWithDict.vcf"), null, false},
+            new Object[]{ new File(testDir, "variantsWithDict.vcf"), new File(testDir, "variantsWithDict.vcf"), null, null, false},
             // source has no dictionary
-            new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "variantsNoDict.vcf"), null, false},
+            new Object[]{ new File(testDir, "variantsNoDict.vcf"), new File(testDir, "variantsNoDict.vcf"), null, null, false},
             // source dictionary is a mismatch for the variant records
-            new Object[]{ new File(testDir, "variantsNoDictWithBadContig.vcf"), new File(testDir, "variantsWithDict.vcf"), null, false},
-            new Object[]{ new File(testDir, "variantsNoDictWithBadContigLength.vcf"), new File(testDir, "variantsWithDict.vcf"), null, false},
+            new Object[]{ new File(testDir, "variantsNoDictWithBadContig.vcf"), new File(testDir, "variantsWithDict.vcf"), null, null, false},
+            new Object[]{ new File(testDir, "variantsNoDictWithBadContigLength.vcf"), new File(testDir, "variantsWithDict.vcf"), null, null, false},
         };
     }
 
@@ -83,14 +91,36 @@ public class UpdateVCFSequenceDictionaryIntegrationTest extends CommandLineProgr
             final File inputVariantsFile,
             final File inputSourceFile,
             final File inputReferenceFile,
+            final String masterSequenceDictionary,
             final boolean replace) {
-        updateSequenceDictionary(inputVariantsFile, inputSourceFile, inputReferenceFile, replace);
+        updateSequenceDictionary(inputVariantsFile, inputSourceFile, inputReferenceFile, masterSequenceDictionary, replace);
+    }
+
+    @Test
+    public void testMasterDictionaryOverride() {
+        final SAMSequenceDictionary actualSequenceDictionary = updateSequenceDictionary(
+                new File(testDir, "variantsNoDict.vcf"),
+                null,
+                null,
+                new File(testDir, "exampleFASTA.dict").getAbsolutePath(),
+                false);
+        final SAMSequenceDictionary expectedSequenceDictionary = SAMSequenceDictionaryExtractor.extractDictionary(
+                Paths.get(new File(testDir, "exampleFASTA.dict").toURI()));
+        // test only that the sequence names and lengths are correct, since "M5" and "UR" attributes will
+        // have been updated during the processing
+        Assert.assertEquals(
+                actualSequenceDictionary.getSequences().stream().map(seq -> seq.getSequenceName()).collect(Collectors.toList()),
+                expectedSequenceDictionary.getSequences().stream().map(seq -> seq.getSequenceName()).collect(Collectors.toList()));
+        Assert.assertEquals(
+                actualSequenceDictionary.getSequences().stream().map(seq -> seq.getSequenceLength()).collect(Collectors.toList()),
+                expectedSequenceDictionary.getSequences().stream().map(seq -> seq.getSequenceLength()).collect(Collectors.toList()));
     }
 
     private SAMSequenceDictionary updateSequenceDictionary(
         final File inputVariantsFile,
         final File inputSourceFile,
         final File inputReferenceFile,
+        final String masterSequenceDictionary,
         final boolean replace)
     {
         ArgumentsBuilder argBuilder = new ArgumentsBuilder();
@@ -105,12 +135,15 @@ public class UpdateVCFSequenceDictionaryIntegrationTest extends CommandLineProgr
         if (replace) {
             argBuilder.addArgument(UpdateVCFSequenceDictionary.REPLACE_ARGUMENT_NAME, Boolean.toString(replace));
         }
+        if (masterSequenceDictionary != null) {
+            argBuilder.addArgument(StandardArgumentDefinitions.SEQUENCE_DICTIONARY_NAME, masterSequenceDictionary);
+        }
 
-        File outFile = createTempFile("updateSequenceDictionary", ".vcf");
+        File outFile = createTempFile("updateSequenceDictionary", ".vcf.gz");
         argBuilder.addOutput(outFile);
         runCommandLine(argBuilder.getArgsList());
 
-        // Don't require an index, since the framework doesn't create one if no input sequnce
+        // Don't require an index, since the framework doesn't create one if no input sequence
         // dictionary is available via getBestAvailableSequenceDictionary.
         try (VCFFileReader vcfReader = new VCFFileReader(outFile, false)) {
             return vcfReader.getFileHeader().getSequenceDictionary();

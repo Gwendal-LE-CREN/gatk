@@ -106,7 +106,7 @@ public final class UpdateVCFSequenceDictionary extends VariantWalker {
                 new VCFHeader() :
                 new VCFHeader(inputHeader.getMetaDataInInputOrder(), inputHeader.getGenotypeSamples()) ;
         getDefaultToolVCFHeaderLines().forEach(line -> outputHeader.addMetaDataLine(line));
-        sourceDictionary = getSequenceDictionaryFromInput(dictionarySource);
+        sourceDictionary = getBestAvailableSequenceDictionary();
 
         // Warn and require opt-in via -replace if we're about to clobber a valid sequence
         // dictionary. Check the input file directly via the header rather than using the
@@ -167,27 +167,45 @@ public final class UpdateVCFSequenceDictionary extends VariantWalker {
         }
     }
 
-    // either throws or returns a valid seq dict
-    private SAMSequenceDictionary getSequenceDictionaryFromInput(final String source) {
-        SAMSequenceDictionary dictionary;
-        if (source == null) {
-            if (hasReference()) {
-                dictionary = getReferenceDictionary();
+    // We need to override getBestAvailableSequenceDictionary() to prevent it from picking up a sequence dictionary
+    // from the very VCF we're trying to update when, for example, we're writing an index for the output vcf, we want the
+    // vcf writer to pick up the same (updated) dictionary that we're going to write to the output header, not
+    // the one from the input. Since this tool has lots of sources dictionaries, this override serves as the single
+    // point of resolution.
+    //
+    @Override
+    public SAMSequenceDictionary getBestAvailableSequenceDictionary() {
+
+        final SAMSequenceDictionary masterDictionary = getMasterSequenceDictionary();
+        SAMSequenceDictionary resultDictionary;
+
+        if (dictionarySource == null) {
+            if (masterDictionary != null) {
+                // note that using the master dictionary arg to specify the new dictionary will result in
+                // sequence dictionary validation happening
+                resultDictionary = masterDictionary;
+            }
+            else if (hasReference()) {
+                    resultDictionary = getReferenceDictionary();
             } else {
                 throw new CommandLineException.MissingArgument(
                         DICTIONARY_ARGUMENT_NAME, "A dictionary source file or reference file must be provided");
             }
-
         } else {
-            dictionary = SAMSequenceDictionaryExtractor.extractDictionary(IOUtils.getPath(dictionarySource));
-            if (dictionary == null || dictionary.getSequences().isEmpty()) {
+            if (masterDictionary != null) {
+                throw new CommandLineException(String.format("Only one of %s or %s may be specified on the command line",
+                        StandardArgumentDefinitions.SEQUENCE_DICTIONARY_NAME,
+                        DICTIONARY_ARGUMENT_NAME));
+            }
+            resultDictionary = SAMSequenceDictionaryExtractor.extractDictionary(IOUtils.getPath(dictionarySource));
+            if (resultDictionary == null || resultDictionary.getSequences().isEmpty()) {
                 throw new CommandLineException.BadArgumentValue(
-                        String.format(
-                            "The specified dictionary source has an empty or invalid sequence dictionary",
-                            dictionarySource)
+                    String.format(
+                        "The specified dictionary source has an empty or invalid sequence dictionary",
+                        dictionarySource)
                 );
             }
         }
-        return dictionary;
+        return resultDictionary;
     }
 }
